@@ -27,6 +27,7 @@ type ModelInfo struct {
 	Cost           string      `json:"cost"`
 	Status         ModelStatus `json:"status"`
 	RequiresStream bool        `json:"requiresStream,omitempty"`
+	Seed           bool        `json:"seed,omitempty"` // 内置兜底条目，不代表官方当前免费清单
 	SyncedAt       time.Time   `json:"syncedAt,omitempty"`
 }
 
@@ -44,11 +45,14 @@ const (
 
 const recommendedModelsURL = cline.ClineAPIBase + "/ai/cline/recommended-models"
 
+// seedModelCandidates 内置兜底条目：保证请求能透传上游拿到真实错误，
+// 而不是被 normalizeRequestModel 静默换成默认模型。它们不计入免费徽标。
 func seedModelCandidates() []*ModelInfo {
 	return []*ModelInfo{
-		{ID: "deepseek/deepseek-v4-flash", Source: "free", Provider: "deepseek", Cost: "free", RequiresStream: true},
-		{ID: "poolside/laguna-s-2.1:free", Source: "free", Provider: "poolside", Cost: "free"},
-		{ID: "stepfun/step-3.7-flash", Source: "free", Provider: "stepfun", Cost: "free", RequiresStream: true},
+		{ID: "deepseek/deepseek-v4-flash", Source: "free", Provider: "deepseek", Cost: "free", Status: ModelActive, RequiresStream: true, Seed: true},
+		{ID: "poolside/laguna-s-2.1:free", Source: "free", Provider: "poolside", Cost: "free", Status: ModelActive, Seed: true},
+		{ID: "stepfun/step-3.7-flash", Source: "free", Provider: "stepfun", Cost: "free", Status: ModelActive, RequiresStream: true, Seed: true},
+		{ID: "moonshotai/kimi-k3", Source: "free", Provider: "moonshotai", Cost: "free", Status: ModelActive, RequiresStream: true, Seed: true},
 	}
 }
 
@@ -132,8 +136,10 @@ func syncRecommendedModels() (int, error) {
 	defer modelsMu.Unlock()
 
 	added := 0
+	fresh := make(map[string]bool, len(payload.Free))
 	for _, m := range payload.Free {
 		id := m.ID
+		fresh[id] = true
 		provider := id
 		if i := indexByte(id, '/'); i >= 0 {
 			provider = id[:i]
@@ -143,6 +149,7 @@ func syncRecommendedModels() (int, error) {
 			cached.Cost = "free"
 			cached.Provider = provider
 			cached.Status = ModelActive
+			cached.Seed = false // 官方清单确认免费，seed 占位转正
 			cached.SyncedAt = time.Now()
 			if cached.Name == "" {
 				cached.Name = m.Name
@@ -162,7 +169,21 @@ func syncRecommendedModels() (int, error) {
 		added++
 	}
 
+	// 官方清单下架的动态条目标记 removed（seed 条目保留 active 以便透传）
+	demoted := 0
+	for id, m := range modelsCache {
+		if m.Seed || fresh[id] || m.Status != ModelActive {
+			continue
+		}
+		m.Status = ModelRemoved
+		m.SyncedAt = time.Now()
+		demoted++
+	}
+
 	modelsLastSync = time.Now()
+	if demoted > 0 {
+		log.Printf("  model sync: %d models removed from official free feed", demoted)
+	}
 	return added, nil
 }
 
@@ -237,6 +258,9 @@ func normalizeRequestModel(id string) string {
 func apiModelList() []map[string]any {
 	out := make([]map[string]any, 0, len(modelsCache))
 	for _, m := range getFreeModels() {
+		if m.Seed {
+			continue // seed 兜底条目不代表官方免费清单，不对外展示
+		}
 		out = append(out, map[string]any{
 			"id":         m.ID,
 			"object":     "model",

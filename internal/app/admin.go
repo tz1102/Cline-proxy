@@ -78,6 +78,10 @@ func registerAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/admin/api/zen/models", corsHandler(handleZenModels))
 	mux.HandleFunc("/admin/api/zen/models/refresh", corsHandler(handleZenModelsRefresh))
 	mux.HandleFunc("/admin/api/zen/stats", corsHandler(handleZenStats))
+	mux.HandleFunc("/admin/api/model-pool", corsHandler(handleModelPoolGet))
+	mux.HandleFunc("/admin/api/model-pool/add", corsHandler(handleModelPoolAdd))
+	mux.HandleFunc("/admin/api/model-pool/remove", corsHandler(handleModelPoolRemove))
+	mux.HandleFunc("/admin/api/model-pool/toggle", corsHandler(handleModelPoolToggle))
 	mux.HandleFunc("/admin/zen/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin/", http.StatusFound)
 	})

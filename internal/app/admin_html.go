@@ -325,6 +325,29 @@ body:not([data-theme="dark"]) .theme-toggle .dark-label{display:none}
 <h2>⚙️ 设置</h2>
 
 <div class="section">
+  <div class="section-title">🎯 模型池 <span class="probe-pill" style="font-weight:normal">只放行池内模型，短名模糊匹配（如 kimi-k3 命中 moonshotai/kimi-k3）</span></div>
+  <div class="section-body">
+    <div class="flex" style="margin-bottom:10px;gap:10px;flex-wrap:wrap">
+      <span class="hint" style="margin:0">池过滤开关：</span>
+      <button class="btn btn-sm" id="mpToggleBtn" onclick="toggleModelPool()">-</button>
+      <span class="hint" style="margin:0">启用后 /v1 请求的模型不在池内将直接 400 拒绝</span>
+    </div>
+    <div class="flex" style="margin-bottom:10px;gap:10px;flex-wrap:wrap">
+      <span class="hint" style="margin:0">仅免费放行：</span>
+      <button class="btn btn-sm" id="mpFreeOnlyBtn" onclick="toggleFreeOnly()">-</button>
+      <span class="hint" style="margin:0">开启后池内模型必须同时在官方免费清单才真正放行，防止误用付费模型烧掉账号赠金（推荐开启）</span>
+    </div>
+    <div class="form-row">
+      <div class="field" style="flex:1"><label>添加模型（支持短名，如 kimi-k3 / glm-5.3 / deepseek-v4.1-flash）</label>
+        <input type="text" id="mpNewId" placeholder="例如: kimi-k3 或 moonshotai/kimi-k3" onkeydown="if(event.key==='Enter')addModelPool()">
+      </div>
+      <button class="btn btn-primary" style="align-self:flex-end" onclick="addModelPool()">➕ 添加</button>
+    </div>
+    <div id="mpList">加载中...</div>
+  </div>
+</div>
+
+<div class="section">
   <div class="section-title">🔑 API 密钥管理</div>
   <div class="section-body">
     <p class="hint">生成的密钥可用于客户端访问代理 API（作为 x-api-key 或 Authorization 头）。</p>
@@ -581,7 +604,7 @@ document.querySelectorAll('.nav-item').forEach(el => {
     _('tab-' + el.dataset.tab).style.display = 'block';
     if (el.dataset.tab === 'dashboard') { loadStats(); loadAccounts(); }
     if (el.dataset.tab === 'accounts') loadAccounts();
-    if (el.dataset.tab === 'settings') { loadKeys(); loadModels(); loadConfig(); }
+    if (el.dataset.tab === 'settings') { loadKeys(); loadModels(); loadConfig(); loadModelPool(); }
     if (el.dataset.tab === 'logs') loadLogs();
     if (el.dataset.tab === 'opencode') { loadOcConfig(); loadOcModels(); loadOcStats(); }
   });
@@ -595,7 +618,7 @@ function switchTab(name) {
   _('tab-' + name).style.display = 'block';
   if (name === 'dashboard') { loadStats(); loadAccounts(); }
   if (name === 'accounts') loadAccounts();
-  if (name === 'settings') { loadKeys(); loadModels(); }
+  if (name === 'settings') { loadKeys(); loadModels(); loadModelPool(); }
   if (name === 'logs') loadLogs();
   if (name === 'opencode') { loadOcConfig(); loadOcModels(); loadOcStats(); }
 }
@@ -1007,6 +1030,75 @@ async function loadModels() {
         '</div>';
     }).join('');
   } catch (e) { _('modelsList').textContent = '加载失败'; }
+}
+
+// ========== 模型池 ==========
+let mpEnabled = false;
+let mpFreeOnly = true;
+
+async function loadModelPool() {
+  try {
+    const d = await api('GET', '/model-pool');
+    mpEnabled = d.data.enabled;
+    mpFreeOnly = d.data.freeOnly !== false;
+    const btn = _('mpToggleBtn');
+    btn.textContent = mpEnabled ? '✅ 已启用（点击关闭）' : '⛔ 已关闭（点击启用）';
+    btn.className = mpEnabled ? 'btn btn-sm btn-success' : 'btn btn-sm';
+    const foBtn = _('mpFreeOnlyBtn');
+    foBtn.textContent = mpFreeOnly ? '✅ 仅免费（点击关闭）' : '⚠️ 关闭中（付费模型会烧赠金）';
+    foBtn.className = mpFreeOnly ? 'btn btn-sm btn-success' : 'btn btn-sm';
+    const list = d.data.models || [];
+    if (!list.length) { _('mpList').textContent = '池子为空（此时放行所有模型）'; return; }
+    _('mpList').innerHTML = list.map(m => {
+      let badge;
+      if (m.freeNow) {
+        badge = '<span class="probe-pill" style="color:var(--green,#2eaf64)">✅ 当前免费</span>';
+      } else {
+        const tip = mpFreeOnly ? '已拦截，回归免费后自动放行' : '放行中，会消耗账号 credits 赠金！';
+        const color = mpFreeOnly ? 'var(--yellow,#c9a227)' : 'var(--red,#d33)';
+        badge = '<span class="probe-pill" style="color:' + color + '">⏸️ 不在免费清单（' + tip + '）</span>';
+      }
+      return '<div class="flex" style="gap:10px;padding:6px 0;border-bottom:1px solid var(--border,#eee);align-items:center">' +
+        '<b style="min-width:220px">' + esc(String(m.id)) + '</b>' + badge +
+        '<button class="btn btn-sm" style="margin-left:auto" onclick="removeModelPool(\'' + esc(String(m.id)) + '\')">🗑️ 移除</button>' +
+        '</div>';
+    }).join('');
+  } catch (e) { _('mpList').textContent = '加载失败: ' + e.message; }
+}
+
+async function addModelPool() {
+  const id = _('mpNewId').value.trim();
+  if (!id) { toast('请填写模型名', 'warn'); return; }
+  try {
+    await api('POST', '/model-pool/add', { id });
+    _('mpNewId').value = '';
+    toast('已加入模型池', 'ok');
+    loadModelPool();
+  } catch (e) { toast('添加失败: ' + e.message, 'err'); }
+}
+
+async function removeModelPool(id) {
+  try {
+    await api('POST', '/model-pool/remove', { id });
+    toast('已移除', 'ok');
+    loadModelPool();
+  } catch (e) { toast('移除失败: ' + e.message, 'err'); }
+}
+
+async function toggleModelPool() {
+  try {
+    const d = await api('POST', '/model-pool/toggle', { enabled: !mpEnabled });
+    toast(d.data ? d.data.message || '已切换' : '已切换', 'ok');
+    loadModelPool();
+  } catch (e) { toast('切换失败: ' + e.message, 'err'); }
+}
+
+async function toggleFreeOnly() {
+  try {
+    const d = await api('POST', '/model-pool/toggle', { freeOnly: !mpFreeOnly });
+    toast(d.data ? d.data.message || '已切换' : '已切换', 'ok');
+    loadModelPool();
+  } catch (e) { toast('切换失败: ' + e.message, 'err'); }
 }
 
 async function refreshModels() {

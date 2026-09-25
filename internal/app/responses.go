@@ -448,6 +448,12 @@ func handleResponses(w http.ResponseWriter, r *http.Request) {
 	isStream, _ := params["stream"].(bool)
 	log.Printf("  responses: model=%s stream=%v", model, isStream)
 
+	// 模型池白名单拦截
+	if !modelPoolAllows(model) {
+		writeJSON(w, http.StatusBadRequest, modelPoolRejectError(model))
+		return
+	}
+
 	chat := responsesToChat(params)
 	chatModel, _ := chat["model"].(string)
 	route := routeModel(chatModel)

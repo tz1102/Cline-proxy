@@ -207,6 +207,12 @@ func StartProxy(host string, port int) error {
 		model, _ := params["model"].(string)
 		log.Printf("  client: stream=%v tools=%d model=%s", isStream, toolCount, model)
 
+		// 模型池白名单拦截
+		if !modelPoolAllows(model) {
+			writeJSON(w, http.StatusBadRequest, modelPoolRejectError(model))
+			return
+		}
+
 		// Override system prompt from override.md for OpenAI format
 		applyOverride(params)
 
@@ -503,6 +509,17 @@ func clineHeaders(token, sessionID string) http.Header {
 	h.Set("Authorization", "Bearer "+token)
 	h.Set("Content-Type", "application/json")
 	h.Set("X-Task-ID", sessionID)
+	// 模拟官方客户端完整请求头（对齐 cline SDK request-headers.ts），
+	// 上游网关按客户端类型路由模型清单，缺头会被当裸 API 降级处理
+	h.Set("HTTP-Referer", "https://cline.bot")
+	h.Set("X-Title", "Cline")
+	h.Set("X-IS-MULTIROOT", "false")
+	h.Set("X-CLIENT-TYPE", "cline-desktop")
+	h.Set("User-Agent", "Cline/"+clineClientVersion)
+	h.Set("X-CLIENT-VERSION", clineClientVersion)
+	h.Set("X-PLATFORM", "win32")
+	h.Set("X-PLATFORM-VERSION", clineClientVersion)
+	h.Set("X-CORE-VERSION", clineClientVersion)
 
 	cfg := getProxyConfig()
 	for k, v := range cfg.Headers {
@@ -511,6 +528,9 @@ func clineHeaders(token, sessionID string) http.Header {
 
 	return h
 }
+
+// clineClientVersion 跟进官方 npm 最新版本（2026-09 核实为 3.0.65）
+const clineClientVersion = "3.0.65"
 
 func callClineAPI(params map[string]any, stream bool) (*http.Response, *Account, error) {
 	acc := pickAccount()
@@ -1369,6 +1389,12 @@ func handleAnthropicMessages(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"error": map[string]string{"message": "messages is required", "type": "parse_error"},
 		})
+		return
+	}
+
+	// 模型池白名单拦截
+	if !modelPoolAllows(req.Model) {
+		writeJSON(w, http.StatusBadRequest, modelPoolRejectError(req.Model))
 		return
 	}
 
