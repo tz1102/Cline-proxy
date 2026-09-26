@@ -193,7 +193,7 @@ body:not([data-theme="dark"]) .theme-toggle .dark-label{display:none}
 <body>
 <div class="layout">
 <div class="sidebar">
-<h1><span class="logo">⚡</span><span class="brand-name">Cline 代理</span><button class="theme-toggle" onclick="toggleTheme()" title="切换主题"><span class="icon" id="themeIcon">🌙</span><span class="light-label">浅色</span><span class="dark-label">深色</span></button></h1>
+<h1><span class="logo">⚡</span><span class="brand-name">Cline 代理</span><button class="theme-toggle" onclick="toggleTheme()" title="切换主题"><span class="icon" id="themeIcon">🌙</span><span class="light-label">浅色</span><span class="dark-label">深色</span></button><button class="theme-toggle" onclick="logout()" title="退出登录">🚪 退出</button></h1>
 <div class="nav-item active" data-tab="dashboard"><span class="nav-ico">📊</span> 仪表盘</div>
 <div class="nav-item" data-tab="accounts"><span class="nav-ico">👤</span> 账号管理</div>
 <div class="nav-item" data-tab="import"><span class="nav-ico">📥</span> 导入账号</div>
@@ -323,6 +323,18 @@ body:not([data-theme="dark"]) .theme-toggle .dark-label{display:none}
 
 <div id="tab-settings" class="tab-panel" style="display:none">
 <h2>⚙️ 设置</h2>
+
+<div class="section">
+  <div class="section-title">🔐 后台登录密码 <span class="probe-pill" style="font-weight:normal">部署到公网前务必改成强密码</span></div>
+  <div class="section-body">
+    <div class="form-row">
+      <div class="field"><label>旧密码</label><input type="password" id="cpOld" autocomplete="current-password"></div>
+      <div class="field"><label>新密码（至少 8 位）</label><input type="password" id="cpNew" autocomplete="new-password"></div>
+      <div class="field"><label>确认新密码</label><input type="password" id="cpNew2" autocomplete="new-password"></div>
+      <button class="btn btn-primary" style="align-self:flex-end" onclick="changePassword()">修改密码</button>
+    </div>
+  </div>
+</div>
 
 <div class="section">
   <div class="section-title">🎯 模型池 <span class="probe-pill" style="font-weight:normal">只放行池内模型，短名模糊匹配（如 kimi-k3 命中 moonshotai/kimi-k3）</span></div>
@@ -638,9 +650,26 @@ async function api(method, path, body) {
   const opts = { method, headers: {} };
   if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
   const res = await fetch(API + path, opts);
+  if (res.status === 401) { location.href = '/admin/login'; throw new Error('登录已过期，请重新登录'); }
   const data = await res.json();
   if (!data.success && data.error) throw new Error(data.error);
   return data;
+}
+
+async function logout() {
+  try { await api('POST', '/logout'); } catch (e) {}
+  location.href = '/admin/login';
+}
+
+async function changePassword() {
+  const oldPwd = _('cpOld').value, newPwd = _('cpNew').value, newPwd2 = _('cpNew2').value;
+  if (!oldPwd || !newPwd) { toast('请填写完整', 'warn'); return; }
+  if (newPwd !== newPwd2) { toast('两次输入的新密码不一致', 'warn'); return; }
+  try {
+    const d = await api('POST', '/change-password', { oldPassword: oldPwd, newPassword: newPwd });
+    toast(d.message || '密码已修改', 'ok');
+    setTimeout(() => { location.href = '/admin/login'; }, 1200);
+  } catch (e) { toast('修改失败: ' + e.message, 'err'); }
 }
 
 // ========== 仪表盘 ==========
